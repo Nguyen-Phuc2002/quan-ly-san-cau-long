@@ -8,7 +8,7 @@ import {
   Edit, XCircle, CalendarDays, CreditCard, UserX, FileSpreadsheet, 
   Wallet, PieChart as PieIcon, BarChart3, TrendingDown, ArrowUpRight, 
   LayoutDashboard, Users, Package, Menu, Search, ChevronLeft, ChevronRight, UserCheck,
-  Trophy, Shuffle, Crown, Swords, Shield, Layers, PlusCircle
+  Trophy, Shuffle, Crown, Swords, Shield, Layers, PlusCircle, Calendar
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts'
 import { toast } from 'sonner'
@@ -95,8 +95,13 @@ export default function AdminPage() {
   const [categories, setCategories] = useState<any[]>([])
   const [registeredTeams, setRegisteredTeams] = useState<any[]>([])
   
+  // Form tạo giải (Cập nhật thêm ngày tháng)
   const [newTourName, setNewTourName] = useState('')
   const [newTourRules, setNewTourRules] = useState('')
+  const [newTourDeadline, setNewTourDeadline] = useState('') // Hạn đăng ký
+  const [newTourStartDate, setNewTourStartDate] = useState('') // Ngày bắt đầu
+  const [newTourEndDate, setNewTourEndDate] = useState('')     // Ngày kết thúc
+
   const [groupNameInput, setGroupNameInput] = useState('') 
   const [selectedCatsForGroup, setSelectedCatsForGroup] = useState<string[]>([]) 
   const [groupsToAdd, setGroupsToAdd] = useState<any[]>([]) 
@@ -145,16 +150,13 @@ export default function AdminPage() {
     return () => { supabase.removeChannel(channel) }
   }, [date])
 
-  // --- REPORT DATA ---
+  // --- REPORT, CRM, BOOKING LOGIC GIỮ NGUYÊN ---
   const fetchReportData = async () => {
     const { data: expData } = await supabase.from('expenses').select('*').ilike('date', `${reportMonth}%`).order('date', { ascending: false })
     if (expData) setExpenses(expData)
-
     const { data: incomeData } = await supabase.from('bookings').select('*').ilike('date', `${reportMonth}%`).eq('is_paid', true)
-    
     let total = 0, service = 0, court = 0
     const dailyMap: Record<string, number> = {}
-
     if (incomeData) {
         incomeData.forEach(b => {
             const billTotal = (b.total_bill || 0)
@@ -169,21 +171,15 @@ export default function AdminPage() {
             dailyMap[day] = (dailyMap[day] || 0) + billTotal
         })
     }
-
     const daysInMonth = new Date(Number(reportMonth.split('-')[0]), Number(reportMonth.split('-')[1]), 0).getDate()
     const dailyChart = Array.from({ length: daysInMonth }, (_, i) => {
         const d = (i + 1).toString().padStart(2, '0')
         return { day: d, revenue: dailyMap[d] || 0 }
     })
-
-    setRevenueData({ 
-        total, service, court, dailyChart,
-        pieChart: [{ name: 'Sân', value: court, color: '#3b82f6' }, { name: 'Dịch Vụ', value: service, color: '#f97316' }]
-    })
+    setRevenueData({ total, service, court, dailyChart, pieChart: [{ name: 'Sân', value: court, color: '#3b82f6' }, { name: 'Dịch Vụ', value: service, color: '#f97316' }] })
   }
   useEffect(() => { if (activeTab === 'finance') fetchReportData() }, [activeTab, reportMonth])
 
-  // --- CRM & BOOKING LOGIC ---
   const customerList = useMemo(() => {
     if (activeTab !== 'crm') return []
     const customers: any = {}
@@ -284,7 +280,6 @@ export default function AdminPage() {
   const cancelEdit = () => { setEditingId(null); setProdName(''); setProdPrice(''); setProdStock(''); setProdCategory('drink') }
   const deleteProduct = async (id: number) => { if(confirm('Xóa?')) { await supabase.from('products').delete().eq('id', id); fetchData() } }
 
-  // --- FIXED SCHEDULE ---
   const setQuickDuration = (months: number) => {
     const start = new Date(fixedStartDate); const end = new Date(start)
     end.setDate(end.getDate() + (months * 30) - 1); setFixedEndDate(end.toISOString().split('T')[0]); setFixedTotalPrice(3000000 * months)
@@ -309,13 +304,10 @@ export default function AdminPage() {
     await supabase.from('bookings').insert(valids); toast.success(`Đã tạo ${valids.length} buổi!`); setShowFixedModal(false); fetchData()
   }
 
-  // --- REPORT & UTILS ---
   const handleAddExpense = async () => {
     if (!expenseName || !expenseAmount) return toast.error('Nhập đủ thông tin!'); await supabase.from('expenses').insert({ title: expenseName, amount: Number(expenseAmount), date: new Date().toISOString().split('T')[0], category: expenseCat }); toast.success('Đã thêm chi phí'); setExpenseName(''); setExpenseAmount(''); fetchReportData()
   }
   const handleDeleteExpense = async (id: number) => { if(confirm('Xóa?')) { await supabase.from('expenses').delete().eq('id', id); fetchReportData() } }
-  
-  // 🎯 FIX LỖI: ĐÃ THÊM BIẾN netProfit
   const totalExpense = expenses.reduce((sum, item) => sum + item.amount, 0)
   const netProfit = revenueData.total - totalExpense
   const profitMargin = revenueData.total > 0 ? (netProfit / revenueData.total) * 100 : 0
@@ -335,7 +327,7 @@ export default function AdminPage() {
     return slotBookings.find(b => b.status === 'confirmed') || slotBookings.find(b => b.status === 'cancelled')
   }
 
-  // === 🎯 TOURNAMENT LOGIC ===
+  // === 🎯 TOURNAMENT LOGIC (UPDATED WITH DATES) ===
   const toggleCatForGroup = (cat: string) => {
       if (selectedCatsForGroup.includes(cat)) setSelectedCatsForGroup(selectedCatsForGroup.filter(c => c !== cat))
       else setSelectedCatsForGroup([...selectedCatsForGroup, cat])
@@ -350,7 +342,17 @@ export default function AdminPage() {
   const createTournament = async () => {
     if (!newTourName) return toast.error('Nhập tên giải!')
     if (groupsToAdd.length === 0) return toast.error('Chưa có nhóm nào!')
-    const { data: tour, error } = await supabase.from('tournaments').insert({ name: newTourName, rules: newTourRules, status: 'open' }).select().single()
+
+    const { data: tour, error } = await supabase.from('tournaments').insert({ 
+        name: newTourName, 
+        rules: newTourRules, 
+        // CẬP NHẬT THÊM 3 TRƯỜNG NGÀY THÁNG
+        registration_deadline: newTourDeadline,
+        start_date: newTourStartDate,
+        end_date: newTourEndDate,
+        status: 'open' 
+    }).select().single()
+
     if (error) return toast.error('Lỗi tạo giải')
     const catsToInsert: any[] = []
     groupsToAdd.forEach(group => {
@@ -359,7 +361,10 @@ export default function AdminPage() {
         })
     })
     await supabase.from('tournament_categories').insert(catsToInsert)
-    toast.success('Đã mở giải đấu thành công!'); setNewTourName(''); setNewTourRules(''); setGroupsToAdd([]); fetchData()
+    toast.success('Đã mở giải đấu thành công!'); 
+    setNewTourName(''); setNewTourRules(''); 
+    setNewTourDeadline(''); setNewTourStartDate(''); setNewTourEndDate(''); // Reset dates
+    setGroupsToAdd([]); fetchData()
   }
 
   const handleSelectTournament = async (tour: any) => {
@@ -377,7 +382,6 @@ export default function AdminPage() {
       if(data) setRegisteredTeams(data)
   }
 
-  // --- XÓA ĐỘI (KHI BỊ TỐ CÁO) ---
   const deleteTeam = async (teamId: number) => {
       if(confirm('Xác nhận xóa đội này khỏi giải đấu?')) {
           await supabase.from('tournament_registrations').delete().eq('id', teamId)
@@ -485,10 +489,7 @@ export default function AdminPage() {
                             {selectedBooking.status !== 'cancelled' && (
                                 <div className="p-6 border-t border-slate-200 bg-slate-50">
                                     <div className="flex justify-between items-end mb-4"><span className="text-sm text-slate-500 font-bold">Tổng cộng</span><span className="text-3xl font-black text-blue-600">{calculateTotal().toLocaleString()}đ</span></div>
-                                    <div className="grid grid-cols-2 gap-3 mb-3">
-                                        {selectedBooking.group_id && role === 'admin' && <button onClick={() => handleDeleteGroup(selectedBooking.group_id)} className="py-3 rounded-xl border border-red-200 text-red-600 text-xs font-bold hover:bg-red-50">Xóa Nhóm</button>}
-                                        <button onClick={handleCancelSession} className="py-3 rounded-xl border border-orange-200 text-orange-600 text-xs font-bold hover:bg-orange-50">Báo Vắng</button>
-                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 mb-3">{selectedBooking.group_id && role === 'admin' && <button onClick={() => handleDeleteGroup(selectedBooking.group_id)} className="py-3 rounded-xl border border-red-200 text-red-600 text-xs font-bold hover:bg-red-50">Xóa Nhóm</button>}<button onClick={handleCancelSession} className="py-3 rounded-xl border border-orange-200 text-orange-600 text-xs font-bold hover:bg-orange-50">Báo Vắng</button></div>
                                     <div className="flex gap-3"><button onClick={handleUpdateOrder} className="flex-1 bg-white border border-slate-300 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50">Lưu</button><button onClick={handleCheckout} className="flex-[2] bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-blue-600 shadow-lg flex justify-center items-center gap-2"><Printer className="w-4 h-4"/> Thu Tiền</button></div>
                                 </div>
                             )}
@@ -498,7 +499,7 @@ export default function AdminPage() {
             </div>
         )}
 
-        {/* TAB 2: TOURNAMENT (GIẢI ĐẤU) */}
+        {/* TAB: TOURNAMENT (GIẢI ĐẤU) - NÂNG CẤP */}
         {activeTab === 'tournament' && (
             <div className="flex-1 p-8 overflow-y-auto bg-slate-50">
                 <div className="max-w-7xl mx-auto">
@@ -514,6 +515,24 @@ export default function AdminPage() {
                                     <input type="text" placeholder="Tên giải đấu (VD: Giải Mùa Hè)" value={newTourName} onChange={(e) => setNewTourName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold"/>
                                     <textarea placeholder="Điều lệ giải (VD: Thời gian, địa điểm, thể thức...)" value={newTourRules} onChange={(e) => setNewTourRules(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl text-sm h-24 resize-none"/>
                                     
+                                    {/* CẬP NHẬT: THÊM 3 INPUT NGÀY THÁNG */}
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Hạn đăng ký</label>
+                                            <input type="date" value={newTourDeadline} onChange={(e) => setNewTourDeadline(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg text-sm"/>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ngày bắt đầu</label>
+                                                <input type="date" value={newTourStartDate} onChange={(e) => setNewTourStartDate(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg text-sm"/>
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ngày kết thúc</label>
+                                                <input type="date" value={newTourEndDate} onChange={(e) => setNewTourEndDate(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg text-sm"/>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                                         <p className="text-xs font-bold text-slate-500 mb-2">Thêm nhóm/bảng đấu</p>
                                         <div className="space-y-2 mb-3">
@@ -549,7 +568,14 @@ export default function AdminPage() {
                                 <div className="space-y-2">
                                     {tournaments.map(t => (
                                         <div key={t.id} onClick={() => handleSelectTournament(t)} className={`p-3 rounded-xl border cursor-pointer transition flex justify-between items-center ${selectedTourId === t.id ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-                                            <div><p className="font-bold text-slate-800 text-sm">{t.name}</p><p className="text-[10px] text-slate-400">{new Date(t.created_at).toLocaleDateString('vi-VN')}</p></div>
+                                            <div>
+                                                <p className="font-bold text-slate-800 text-sm">{t.name}</p>
+                                                {/* Hiển thị ngày tháng */}
+                                                <div className="flex gap-2 mt-1">
+                                                    <span className="text-[10px] text-slate-400 flex items-center gap-1"><CalendarDays className="w-3 h-3"/> {new Date(t.created_at).toLocaleDateString('vi-VN')}</span>
+                                                    {t.start_date && <span className="text-[10px] text-blue-500 font-bold bg-blue-50 px-1 rounded">Start: {new Date(t.start_date).toLocaleDateString('vi-VN').slice(0,5)}</span>}
+                                                </div>
+                                            </div>
                                             <button onClick={(e) => {e.stopPropagation(); deleteTournament(t.id)}} className="text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
                                         </div>
                                     ))}
@@ -614,7 +640,7 @@ export default function AdminPage() {
                                                 <div className="text-center font-bold text-blue-600 uppercase text-[10px] mb-2 bg-blue-50 py-1 rounded">
                                                     {round.length === 1 ? 'Chung Kết' : `Vòng ${roundIndex + 1}`}
                                                 </div>
-                                                {round.map((match, matchIndex) => (
+                                                {round.map((match: any, matchIndex: number) => (
                                                     <div key={match.id} className="relative flex flex-col gap-px group">
                                                         {/* CSS Connector */}
                                                         {roundIndex < activeBracket.length - 1 && (<div className="absolute top-1/2 -right-8 w-8 h-px bg-slate-300 z-0"></div>)}

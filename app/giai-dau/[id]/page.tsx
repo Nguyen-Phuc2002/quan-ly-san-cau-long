@@ -1,8 +1,8 @@
 'use client'
-import { useEffect, useState, use } from 'react'
+import { useEffect, useState, use, useMemo } from 'react'
 import { supabase } from '@/utils/supabase'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Trophy, Calendar, Users, CheckCircle, Share2, Swords, LayoutGrid, CheckSquare, Square, UserPlus, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, Trophy, Calendar, Users, CheckCircle, Share2, Swords, LayoutGrid, CheckSquare, Square, UserPlus, Trash2, Plus, ChevronDown, ChevronUp, Layers } from 'lucide-react'
 import { toast } from 'sonner'
 
 // Định nghĩa kiểu cho 1 cặp VĐV
@@ -27,6 +27,9 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
   const [selectedCatIds, setSelectedCatIds] = useState<string[]>([]) 
   const [memberMap, setMemberMap] = useState<Record<string, PlayerPair[]>>({}) 
   
+  // State quản lý đóng/mở nhóm (Accordion)
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([])
+
   // State hiển thị dữ liệu
   const [registrations, setRegistrations] = useState<any[]>([])
   const [viewCatId, setViewCatId] = useState<string>('all') 
@@ -40,6 +43,11 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
       if (catData && catData.length > 0) {
           setCategories(catData)
           setViewCatId(catData[0].id.toString()) 
+          
+          // Mặc định mở nhóm đầu tiên cho khách thấy
+          if (catData[0].group_name) {
+              setExpandedGroups([catData[0].group_name])
+          }
       }
 
       const { data: regData } = await supabase.from('tournament_registrations')
@@ -52,7 +60,26 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
     fetchData()
   }, [id])
 
+  // --- LOGIC GOM NHÓM (GROUPING) ---
+  const groupedCategories = useMemo(() => {
+    return categories.reduce((acc: any, cat: any) => {
+        const group = cat.group_name || 'Khác';
+        if (!acc[group]) acc[group] = [];
+        acc[group].push(cat);
+        return acc;
+    }, {});
+  }, [categories]);
+
+  const toggleGroup = (groupName: string) => {
+      if (expandedGroups.includes(groupName)) {
+          setExpandedGroups(expandedGroups.filter(g => g !== groupName))
+      } else {
+          setExpandedGroups([...expandedGroups, groupName])
+      }
+  }
+
   // --- LOGIC CHỌN NHIỀU & QUẢN LÝ CẶP VĐV ---
+  
   const toggleCategory = (catId: string) => {
       if (selectedCatIds.includes(catId)) {
           setSelectedCatIds(selectedCatIds.filter(id => id !== catId))
@@ -112,7 +139,7 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                 team_name: displayTeamName,
                 phone_number: phone,
                 members: memberString,
-                status: 'approved' // <--- SỬA THÀNH APPROVED (VÀO THẲNG)
+                status: 'approved'
             })
         })
     })
@@ -121,14 +148,10 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
 
     if(error) toast.error('Lỗi đăng ký: ' + error.message)
     else {
-        toast.success(`Đăng ký thành công! Tên bạn đã xuất hiện trong danh sách.`)
+        toast.success(`Đăng ký thành công ${registrationsToInsert.length} suất thi đấu!`)
         setTeamName(''); setPhone(''); setSelectedCatIds([]); setMemberMap({})
-        
-        // Refresh list ngay lập tức
         const { data } = await supabase.from('tournament_registrations').select(`*, tournament_categories (name, group_name)`).eq('tournament_id', id)
         if(data) setRegistrations(data)
-        
-        // Chuyển sang tab danh sách để khách thấy tên mình
         setActiveTab('teams')
     }
   }
@@ -178,58 +201,82 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
 
             <div className="p-6 md:p-8">
                 
-                {/* 1. ĐĂNG KÝ */}
+                {/* 1. ĐĂNG KÝ (GIAO DIỆN MỚI GỌN GÀNG) */}
                 {activeTab === 'register' && (
                     <div className="max-w-xl mx-auto">
                         <div className="text-center mb-8">
                             <h3 className="text-2xl font-black text-slate-800">Đăng Ký Tham Gia</h3>
-                            <p className="text-slate-500 text-sm mt-1">Đăng ký cho CLB hoặc Cá nhân (Vào danh sách ngay)</p>
+                            <p className="text-slate-500 text-sm mt-1">Đăng ký cho CLB hoặc Cá nhân</p>
                         </div>
                         
                         <div className="space-y-6 bg-slate-50 p-6 rounded-2xl border border-slate-200 shadow-sm">
-                            {/* THÔNG TIN CHUNG CỦA ĐỘI */}
                             <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-xs font-bold text-slate-500 uppercase block mb-2">Tên Đội / CLB</label>
-                                    <input type="text" value={teamName} onChange={e => setTeamName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl font-bold text-sm" placeholder="VD: CLB Cầu Lông Vui"/>
-                                </div>
-                                <div>
-                                    <label className="text-xs font-bold text-slate-500 uppercase block mb-2">Số điện thoại</label>
-                                    <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl font-bold text-sm" placeholder="09xxxx"/>
-                                </div>
+                                <div><label className="text-xs font-bold text-slate-500 uppercase block mb-2">Tên Đội / CLB</label><input type="text" value={teamName} onChange={e => setTeamName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl font-bold text-sm" placeholder="VD: CLB Cầu Lông Vui"/></div>
+                                <div><label className="text-xs font-bold text-slate-500 uppercase block mb-2">Số điện thoại</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl font-bold text-sm" placeholder="09xxxx"/></div>
                             </div>
                             
-                            {/* DANH SÁCH NỘI DUNG */}
+                            {/* DANH SÁCH NHÓM & NỘI DUNG (ACCORDION) */}
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase block mb-3">Chọn Nội Dung & Nhập VĐV</label>
-                                <div className="space-y-4">
-                                    {categories.map(cat => {
-                                        const isSelected = selectedCatIds.includes(cat.id.toString())
-                                        const pairs = memberMap[cat.id.toString()] || []
+                                <div className="space-y-3">
+                                    {Object.entries(groupedCategories).map(([groupName, cats]: [string, any]) => {
+                                        const isExpanded = expandedGroups.includes(groupName)
+                                        // Kiểm tra xem trong nhóm này có mục nào được chọn không để highlight
+                                        const hasSelection = cats.some((c:any) => selectedCatIds.includes(c.id.toString()))
+                                        
                                         return (
-                                            <div key={cat.id} className={`p-4 rounded-xl border transition-all duration-200 overflow-hidden ${isSelected ? 'bg-white border-blue-500 ring-2 ring-blue-500/20 shadow-md' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
-                                                <div className="flex items-center gap-3 cursor-pointer" onClick={() => toggleCategory(cat.id.toString())}>
-                                                    {isSelected ? <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0"/> : <Square className="w-5 h-5 text-slate-300 flex-shrink-0"/>}
-                                                    <div>
-                                                        <p className={`font-bold text-sm ${isSelected ? 'text-blue-700' : 'text-slate-700'}`}>{cat.name}</p>
-                                                        <p className="text-xs text-slate-500">{cat.group_name} • {cat.level || 'Tự do'}</p>
+                                            <div key={groupName} className={`rounded-xl border overflow-hidden transition-all duration-300 ${hasSelection ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200 bg-white'}`}>
+                                                {/* Header Nhóm - Bấm để mở */}
+                                                <button 
+                                                    onClick={() => toggleGroup(groupName)}
+                                                    className="w-full p-4 flex justify-between items-center bg-white hover:bg-slate-50 transition"
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <Layers className={`w-4 h-4 ${hasSelection ? 'text-blue-600' : 'text-slate-400'}`}/>
+                                                        <span className={`font-bold text-sm ${hasSelection ? 'text-blue-700' : 'text-slate-700'}`}>{groupName}</span>
+                                                        {hasSelection && <span className="text-[10px] bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-bold">Đã chọn</span>}
                                                     </div>
-                                                </div>
-                                                {isSelected && (
-                                                    <div className="mt-3 pl-8 animate-in fade-in slide-in-from-top-2 duration-300">
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 mt-3 flex items-center gap-1"><UserPlus className="w-3 h-3"/> Nhập tên các cặp VĐV:</p>
-                                                        <div className="space-y-2">
-                                                            {pairs.map((pair, index) => (
-                                                                <div key={index} className="flex gap-2 items-center">
-                                                                    <span className="text-xs font-bold text-slate-400 w-8 flex-shrink-0">#{index + 1}</span>
-                                                                    <input type="text" placeholder="VĐV 1" value={pair.player1} onChange={(e) => handleInputChange(cat.id.toString(), index, 'player1', e.target.value)} className="flex-1 p-2 border border-blue-200 bg-blue-50/50 rounded-lg text-sm font-medium focus:border-blue-500 outline-none"/>
-                                                                    <span className="text-slate-300">-</span>
-                                                                    <input type="text" placeholder="VĐV 2" value={pair.player2} onChange={(e) => handleInputChange(cat.id.toString(), index, 'player2', e.target.value)} className="flex-1 p-2 border border-blue-200 bg-blue-50/50 rounded-lg text-sm font-medium focus:border-blue-500 outline-none"/>
-                                                                    {pairs.length > 1 && <button onClick={() => removePair(cat.id.toString(), index)} className="p-2 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>}
+                                                    {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400"/> : <ChevronDown className="w-4 h-4 text-slate-400"/>}
+                                                </button>
+
+                                                {/* Danh sách nội dung bên trong */}
+                                                {isExpanded && (
+                                                    <div className="p-4 pt-0 border-t border-slate-100 space-y-3 bg-slate-50/50">
+                                                        {cats.map((cat: any) => {
+                                                            const isSelected = selectedCatIds.includes(cat.id.toString())
+                                                            const pairs = memberMap[cat.id.toString()] || []
+                                                            
+                                                            return (
+                                                                <div key={cat.id} className={`p-3 rounded-lg border transition-all ${isSelected ? 'bg-white border-blue-500 ring-1 ring-blue-500/20 shadow-sm' : 'bg-white border-slate-200'}`}>
+                                                                    {/* Checkbox */}
+                                                                    <div className="flex items-center gap-3 cursor-pointer" onClick={() => toggleCategory(cat.id.toString())}>
+                                                                        {isSelected ? <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0"/> : <Square className="w-5 h-5 text-slate-300 flex-shrink-0"/>}
+                                                                        <div>
+                                                                            <p className={`font-bold text-sm ${isSelected ? 'text-blue-700' : 'text-slate-700'}`}>{cat.name}</p>
+                                                                            <p className="text-xs text-slate-500">{cat.level || 'Tự do'}</p>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Ô nhập liệu (chỉ hiện khi chọn) */}
+                                                                    {isSelected && (
+                                                                        <div className="mt-3 pl-8 animate-in fade-in slide-in-from-top-2">
+                                                                            <div className="space-y-2">
+                                                                                {pairs.map((pair, index) => (
+                                                                                    <div key={index} className="flex gap-2 items-center">
+                                                                                        <span className="text-xs font-bold text-slate-400 w-8 flex-shrink-0">#{index + 1}</span>
+                                                                                        <input type="text" placeholder="VĐV 1" value={pair.player1} onChange={(e) => handleInputChange(cat.id.toString(), index, 'player1', e.target.value)} className="flex-1 p-2 border border-blue-200 bg-blue-50/50 rounded-lg text-sm focus:border-blue-500 outline-none"/>
+                                                                                        <span className="text-slate-300">-</span>
+                                                                                        <input type="text" placeholder="VĐV 2" value={pair.player2} onChange={(e) => handleInputChange(cat.id.toString(), index, 'player2', e.target.value)} className="flex-1 p-2 border border-blue-200 bg-blue-50/50 rounded-lg text-sm focus:border-blue-500 outline-none"/>
+                                                                                        {pairs.length > 1 && <button onClick={() => removePair(cat.id.toString(), index)} className="p-2 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                            <button onClick={() => addPair(cat.id.toString())} className="mt-3 text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"><Plus className="w-3 h-3"/> Thêm cặp nữa</button>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                            ))}
-                                                        </div>
-                                                        <button onClick={() => addPair(cat.id.toString())} className="mt-3 text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"><Plus className="w-3 h-3"/> Thêm cặp nữa</button>
+                                                            )
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
@@ -237,6 +284,7 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                                     })}
                                 </div>
                             </div>
+
                             <button onClick={handleRegister} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 shadow-lg hover:shadow-blue-200 transition-all transform hover:-translate-y-0.5">
                                 Gửi Đăng Ký ({selectedCatIds.length} nội dung)
                             </button>
@@ -244,16 +292,12 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                     </div>
                 )}
 
-                {/* --- MENU CHỌN NỘI DUNG (FILTER) --- */}
+                {/* --- MENU FILTER (TAB KHÁC) --- */}
                 {activeTab !== 'register' && (
                     <div className="mb-6 flex overflow-x-auto gap-2 pb-2 custom-scrollbar">
-                        {activeTab === 'teams' && (
-                            <button onClick={() => setViewCatId('all')} className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition border ${viewCatId === 'all' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>Tất cả</button>
-                        )}
+                        {activeTab === 'teams' && <button onClick={() => setViewCatId('all')} className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition border ${viewCatId === 'all' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>Tất cả</button>}
                         {categories.map(cat => (
-                            <button key={cat.id} onClick={() => setViewCatId(cat.id.toString())} className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition border flex flex-col items-start ${viewCatId === cat.id.toString() ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
-                                <span>{cat.group_name}</span><span className="text-[10px] opacity-80 font-normal">{cat.name}</span>
-                            </button>
+                            <button key={cat.id} onClick={() => setViewCatId(cat.id.toString())} className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition border flex flex-col items-start ${viewCatId === cat.id.toString() ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><span>{cat.group_name}</span><span className="text-[10px] opacity-80 font-normal">{cat.name}</span></button>
                         ))}
                     </div>
                 )}
@@ -262,7 +306,7 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                 {activeTab === 'teams' && (
                     <div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {filteredRegistrations.length === 0 ? <p className="text-slate-400 text-center col-span-2 py-10">Chưa có đội nào đăng ký nội dung này.</p> :
+                            {filteredRegistrations.length === 0 ? <p className="text-slate-400 text-center col-span-2 py-10">Chưa có đội nào đăng ký.</p> :
                             filteredRegistrations.map((reg, idx) => (
                                 <div key={reg.id} className="flex items-center gap-4 p-4 border border-slate-100 rounded-xl bg-slate-50 hover:border-blue-200 transition">
                                     <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center font-black text-slate-300 border border-slate-200">{idx + 1}</div>
@@ -271,16 +315,14 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                                         <div className="flex gap-2 text-xs text-slate-500 mt-1"><span className="bg-white px-2 py-0.5 rounded border border-slate-200">{reg.tournament_categories?.group_name} - {reg.tournament_categories?.name}</span></div>
                                         <p className="text-sm text-blue-600 font-medium mt-1 flex items-center gap-1"><Users className="w-3 h-3"/> {reg.members}</p>
                                     </div>
-                                    <div className="ml-auto">
-                                        <span className="text-[10px] px-2 py-1 rounded-full font-bold uppercase bg-green-100 text-green-700">Đã tham gia</span>
-                                    </div>
+                                    <div className="ml-auto"><span className="text-[10px] px-2 py-1 rounded-full font-bold uppercase bg-green-100 text-green-700">Đã tham gia</span></div>
                                 </div>
                             ))}
                         </div>
                     </div>
                 )}
 
-                {/* 3. NHÁNH ĐẤU (VIEW ONLY) */}
+                {/* 3. NHÁNH ĐẤU (GIỮ NGUYÊN) */}
                 {activeTab === 'bracket' && (
                     <div className="overflow-x-auto pb-4">
                          <div className="min-w-[800px] flex justify-start gap-12">
@@ -296,8 +338,8 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                                         </div>
                                     ))}
                                 </div>
-                            )) : <div className="w-full text-center py-20 text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl"><Trophy className="w-12 h-12 mx-auto mb-2 opacity-20"/><p>Chưa có nhánh đấu cho nội dung này.</p></div>}
-                             {activeBracket && activeBracket[activeBracket.length - 1][0].winner && (<div className="flex flex-col justify-center items-center w-40 pl-8"><div className="text-center font-bold text-yellow-500 uppercase text-[10px] mb-2 tracking-wider">Nhà Vô Địch</div><div className="p-4 bg-gradient-to-b from-yellow-100 to-yellow-50 border-2 border-yellow-400 text-yellow-800 rounded-2xl shadow-xl text-center"><Trophy className="w-8 h-8 mx-auto mb-2 text-yellow-600"/><p className="font-black text-sm">{activeBracket[activeBracket.length - 1][0].winner}</p></div></div>)}
+                            )) : <div className="w-full text-center py-20 text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl"><Trophy className="w-12 h-12 mx-auto mb-2 opacity-20"/><p>Chưa có nhánh đấu.</p></div>}
+                            {activeBracket && activeBracket[activeBracket.length - 1][0].winner && (<div className="flex flex-col justify-center items-center w-40 pl-8"><div className="text-center font-bold text-yellow-500 uppercase text-[10px] mb-2 tracking-wider">Nhà Vô Địch</div><div className="p-4 bg-gradient-to-b from-yellow-100 to-yellow-50 border-2 border-yellow-400 text-yellow-800 rounded-2xl shadow-xl text-center"><Trophy className="w-8 h-8 mx-auto mb-2 text-yellow-600"/><p className="font-black text-sm">{activeBracket[activeBracket.length - 1][0].winner}</p></div></div>)}
                          </div>
                     </div>
                 )}
@@ -309,7 +351,7 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                             {[1, 2, 3, 4].map(court => (
                                 <div key={court} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
                                     <div className="bg-slate-100 p-3 text-center font-bold text-slate-700 border-b border-slate-200">SÂN {court}</div>
-                                    <div className="p-4 space-y-3 min-h-[200px]"><div className="bg-blue-50 p-3 rounded-lg text-xs border border-blue-100"><span className="font-bold block text-blue-700 mb-1">Trận 1 (Vòng loại)</span><div className="flex justify-between text-slate-600"><span>Team A</span> <span>vs</span> <span>Team B</span></div><div className="mt-2 pt-2 border-t border-blue-200/50 text-[10px] text-slate-400 text-center">08:00 - 08:30</div></div><p className="text-center text-xs text-slate-300 italic pt-4">Trống lịch</p></div>
+                                    <div className="p-4 space-y-3 min-h-[200px]"><div className="bg-blue-50 p-3 rounded-lg text-xs border border-blue-100"><span className="font-bold block text-blue-700 mb-1">Trận 1</span><div className="flex justify-between text-slate-600"><span>A</span> <span>vs</span> <span>B</span></div></div><p className="text-center text-xs text-slate-300 italic pt-4">Trống lịch</p></div>
                                 </div>
                             ))}
                         </div>
