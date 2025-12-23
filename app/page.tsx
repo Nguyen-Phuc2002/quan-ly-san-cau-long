@@ -48,15 +48,20 @@ export default function Home() {
             </p>
 
             {/* Nút Tra Cứu To & Nổi Bật */}
-            <div className="flex justify-center">
-                 <Link href="/tra-cuu">
-                    <button className="group relative bg-white text-blue-700 px-8 py-4 rounded-full font-bold text-lg shadow-xl hover:shadow-2xl hover:bg-blue-50 transition-all duration-300 flex items-center gap-3">
-                        <Search className="w-5 h-5 group-hover:scale-110 transition-transform"/> 
-                        Tra cứu lịch đặt của bạn
-                        <ArrowRight className="w-4 h-4 opacity-50 group-hover:translate-x-1 transition-transform"/>
-                    </button>
-                </Link>
-            </div>
+            <div className="mt-8 flex justify-center gap-3 flex-wrap">
+            <Link href="/tra-cuu">
+                <button className="flex items-center gap-2 bg-white text-slate-700 border border-slate-200 px-6 py-3 rounded-full font-bold shadow-sm hover:bg-slate-50 hover:text-blue-600 transition-all">
+                    <Search className="w-4 h-4 text-blue-600"/> Tra cứu lịch
+                </button>
+            </Link>
+            
+            {/* NÚT GIẢI ĐẤU MỚI */}
+            <Link href="/giai-dau">
+                <button className="flex items-center gap-2 bg-gradient-to-r from-yellow-400 to-orange-500 text-white border border-transparent px-6 py-3 rounded-full font-bold shadow-lg hover:shadow-orange-200 hover:-translate-y-1 transition-all">
+                    <Trophy className="w-4 h-4"/> Giải Đấu HOT
+                </button>
+            </Link>
+        </div>
         </div>
       </div>
 

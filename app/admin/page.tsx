@@ -7,9 +7,10 @@ import {
   TrendingUp, ArrowLeft, Clock, User, LogOut, QrCode, Save, Settings, 
   Edit, XCircle, CalendarDays, CreditCard, UserX, FileSpreadsheet, 
   Wallet, PieChart as PieIcon, BarChart3, TrendingDown, ArrowUpRight, 
-  LayoutDashboard, Users, Package, Menu, Search, ChevronLeft, ChevronRight, UserCheck 
+  LayoutDashboard, Users, Package, Menu, Search, ChevronLeft, ChevronRight, UserCheck,
+  Trophy, Shuffle, Crown, Swords, Shield, Layers, PlusCircle
 } from 'lucide-react'
-import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area, PieChart, Pie, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts'
 import { toast } from 'sonner'
 import * as XLSX from 'xlsx'
 
@@ -37,6 +38,9 @@ const EXPENSE_CATS = [
     { id: 'other', name: 'Khác' },
 ]
 
+// DANH MỤC NỘI DUNG THI ĐẤU CƠ BẢN
+const BASE_CATEGORIES = ['Đôi Nam', 'Đôi Nữ', 'Đôi Nam Nữ', 'Đơn Nam', 'Đơn Nữ']
+
 export default function AdminPage() {
   const router = useRouter()
   // UI State
@@ -57,6 +61,7 @@ export default function AdminPage() {
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const [cart, setCart] = useState<any[]>([]) 
   const [showFixedModal, setShowFixedModal] = useState(false)
+  const [showProfitModal, setShowProfitModal] = useState(false)
   
   // Settings
   const [tempPrice, setTempPrice] = useState(0) 
@@ -85,6 +90,24 @@ export default function AdminPage() {
   const [expenseCat, setExpenseCat] = useState('utilities')
   const [revenueData, setRevenueData] = useState<any>({ total: 0, service: 0, court: 0, dailyChart: [], pieChart: [] })
 
+  // --- STATE GIẢI ĐẤU ---
+  const [tournaments, setTournaments] = useState<any[]>([])
+  const [categories, setCategories] = useState<any[]>([])
+  const [registeredTeams, setRegisteredTeams] = useState<any[]>([])
+  
+  const [newTourName, setNewTourName] = useState('')
+  const [newTourRules, setNewTourRules] = useState('')
+  const [groupNameInput, setGroupNameInput] = useState('') 
+  const [selectedCatsForGroup, setSelectedCatsForGroup] = useState<string[]>([]) 
+  const [groupsToAdd, setGroupsToAdd] = useState<any[]>([]) 
+
+  const [selectedTourId, setSelectedTourId] = useState<number | null>(null)
+  const [selectedCatId, setSelectedCatId] = useState<number | null>(null)
+  const [activeBracket, setActiveBracket] = useState<any>(null)
+
+  const [teamInput, setTeamInput] = useState('')
+  const [participants, setParticipants] = useState<any[]>([])
+
   // --- AUTH ---
   useEffect(() => {
     const checkUser = async () => {
@@ -102,36 +125,25 @@ export default function AdminPage() {
   const fetchData = async () => {
     const { data: bookingData } = await supabase.from('bookings').select('*').eq('date', date)
     if (bookingData) setBookings(bookingData)
-
     const { data: productData } = await supabase.from('products').select('*').order('category')
     if (productData) setProducts(productData)
-
     const { data: courtData } = await supabase.from('courts').select('*').order('id')
     if (courtData && courtData.length > 0) {
         setCourts(courtData)
         setPricePerHour(courtData[0].price_per_hour)
         setTempPrice(courtData[0].price_per_hour)
     }
+    const { data: tourData } = await supabase.from('tournaments').select('*').order('created_at', { ascending: false })
+    if (tourData) setTournaments(tourData)
   }
-
-  // === 🎯 REALTIME UPDATE (MỚI THÊM VÀO) ===
+  
   useEffect(() => {
-    // 1. Gọi dữ liệu lần đầu
     fetchData()
-
-    // 2. Đăng ký lắng nghe thay đổi
-    const channel = supabase
-      .channel('admin_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
-        // Có ai đó đặt/hủy/sửa -> Gọi lại fetchData ngay
-        fetchData()
-      })
+    const channel = supabase.channel('admin_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => fetchData())
       .subscribe()
-
-    // 3. Dọn dẹp
     return () => { supabase.removeChannel(channel) }
-  }, [date]) // Khi ngày thay đổi -> Chạy lại từ đầu
-
+  }, [date])
 
   // --- REPORT DATA ---
   const fetchReportData = async () => {
@@ -171,18 +183,13 @@ export default function AdminPage() {
   }
   useEffect(() => { if (activeTab === 'finance') fetchReportData() }, [activeTab, reportMonth])
 
-  // --- CRM DATA ---
+  // --- CRM & BOOKING LOGIC ---
   const customerList = useMemo(() => {
     if (activeTab !== 'crm') return []
     const customers: any = {}
     bookings.forEach(b => {
         if (!b.phone_number) return
-        if (!customers[b.phone_number]) {
-            customers[b.phone_number] = { 
-                phone: b.phone_number, name: b.customer_name, 
-                visits: 0, totalSpent: 0, lastVisit: b.date 
-            }
-        }
+        if (!customers[b.phone_number]) customers[b.phone_number] = { phone: b.phone_number, name: b.customer_name, visits: 0, totalSpent: 0, lastVisit: b.date }
         customers[b.phone_number].visits += 1
         if(b.is_paid) customers[b.phone_number].totalSpent += (b.total_bill || 0)
         if(b.date > customers[b.phone_number].lastVisit) customers[b.phone_number].lastVisit = b.date
@@ -190,27 +197,21 @@ export default function AdminPage() {
     return Object.values(customers).sort((a:any, b:any) => b.totalSpent - a.totalSpent)
   }, [bookings, activeTab])
 
-  // --- BOOKING LOGIC ---
   const handleSelectBooking = (booking: any) => { setSelectedBooking(booking); setCart(booking.services_detail || []) }
   const closeInvoice = () => { setSelectedBooking(null); setCart([]) }
-  
   const addToCart = (product: any) => {
     if (product.stock !== null && product.stock <= 0) return toast.error(`Hết hàng! Kho còn: ${product.stock}`)
     const existing = cart.find(item => item.id === product.id)
     if (existing) {
         if (product.stock !== null && existing.qty >= product.stock) return toast.error('Không đủ số lượng trong kho')
         setCart(cart.map(item => item.id === product.id ? { ...item, qty: item.qty + 1 } : item))
-    } else {
-        setCart([...cart, { ...product, qty: 1 }])
-    }
+    } else { setCart([...cart, { ...product, qty: 1 }]) }
   }
-  
   const removeFromCart = (productId: number) => {
     const existing = cart.find(item => item.id === productId)
     if (existing?.qty === 1) setCart(cart.filter(item => item.id !== productId))
     else setCart(cart.map(item => item.id === productId ? { ...item, qty: item.qty - 1 } : item))
   }
-
   const calculateTotal = () => {
     if (!selectedBooking) return 0
     if (selectedBooking.total_bill && selectedBooking.total_bill > 0 && selectedBooking.group_id) {
@@ -222,57 +223,53 @@ export default function AdminPage() {
     const serviceFee = cart.reduce((sum, item) => sum + (item.price * item.qty), 0)
     return courtFee + serviceFee
   }
-
+  const calculateTotalForDB = () => {
+    if (!selectedBooking) return 0
+    const serviceFee = cart.reduce((sum, item) => sum + (item.price * item.qty), 0)
+    let courtFee = 0
+    if (selectedBooking.group_id) {
+        const oldServiceFee = selectedBooking.services_detail ? selectedBooking.services_detail.reduce((sum:any, i:any) => sum + (i.price * i.qty), 0) : 0
+        courtFee = (selectedBooking.total_bill || 0) - oldServiceFee
+    } else {
+        const hours = selectedBooking.end_hour - selectedBooking.start_hour
+        courtFee = hours * pricePerHour
+    }
+    return courtFee + serviceFee
+  }
   const handleUpdateOrder = async () => {
     if (!selectedBooking) return
-    const total = calculateTotal()
+    const total = calculateTotalForDB()
     await supabase.from('bookings').update({ total_bill: total, services_detail: cart }).eq('id', selectedBooking.id)
-    toast.success('Đã lưu món!')
-    fetchData()
+    toast.success('Đã lưu món!'); fetchData()
   }
-
   const handleCheckout = async () => {
     if (!selectedBooking) return
-    const total = calculateTotal()
     for (const item of cart) {
         const product = products.find(p => p.id === item.id)
         if (product && product.stock !== null) {
             await supabase.from('products').update({ stock: product.stock - item.qty }).eq('id', item.id)
         }
     }
+    const total = calculateTotalForDB()
     await supabase.from('bookings').update({ is_paid: true, total_bill: total, services_detail: cart, status: 'confirmed' }).eq('id', selectedBooking.id)
-    toast.success('Thanh toán thành công!', { description: `Đã thu ${total.toLocaleString()}đ` })
-    fetchData()
+    toast.success('Thanh toán thành công!', { description: `Thu thêm: ${calculateTotal().toLocaleString()}đ` }); fetchData()
   }
-
-  // --- ACTIONS ---
   const handleDelete = async (id: number) => {
     if (role !== 'admin') return toast.error('Chỉ Admin mới có quyền xóa!')
-    if(confirm('Xóa VĨNH VIỄN lịch này?')) {
-        await supabase.from('bookings').delete().eq('id', id); toast.info('Đã xóa'); setSelectedBooking(null); fetchData()
-    }
+    if(confirm('Xóa VĨNH VIỄN lịch này?')) { await supabase.from('bookings').delete().eq('id', id); toast.info('Đã xóa'); setSelectedBooking(null); fetchData() }
   }
   const handleDeleteGroup = async (groupId: string) => {
     if (role !== 'admin') return toast.error('Chỉ Admin mới có quyền xóa nhóm!')
-    if(confirm('Xóa TOÀN BỘ lịch cố định của nhóm này?')) {
-        await supabase.from('bookings').delete().eq('group_id', groupId); toast.success('Đã xóa nhóm lịch'); setSelectedBooking(null); fetchData()
-    }
+    if(confirm('Xóa TOÀN BỘ lịch cố định của nhóm này?')) { await supabase.from('bookings').delete().eq('group_id', groupId); toast.success('Đã xóa nhóm lịch'); setSelectedBooking(null); fetchData() }
   }
   const handleCancelSession = async () => {
     if(!selectedBooking) return
-    if(confirm(`Xác nhận đội ${selectedBooking.customer_name} VẮNG hôm nay?`)) {
-        await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', selectedBooking.id)
-        toast.warning('Đã báo vắng!'); setSelectedBooking(null); fetchData()
-    }
+    if(confirm(`Xác nhận đội ${selectedBooking.customer_name} VẮNG hôm nay?`)) { await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', selectedBooking.id); toast.warning('Đã báo vắng!'); setSelectedBooking(null); fetchData() }
   }
-  
   const handleCheckIn = async () => {
     if(!selectedBooking) return
-    await supabase.from('bookings').update({ is_checked_in: true }).eq('id', selectedBooking.id)
-    toast.success('Đã Check-in khách vào sân!'); fetchData()
+    await supabase.from('bookings').update({ is_checked_in: true }).eq('id', selectedBooking.id); toast.success('Đã Check-in!'); fetchData()
   }
-
-  // --- SETTINGS ---
   const updateCourtPrice = async () => {
     const { error } = await supabase.from('courts').update({ price_per_hour: Number(tempPrice) }).gt('id', 0)
     if (!error) { toast.success('Cập nhật giá thành công'); fetchData() }
@@ -290,8 +287,7 @@ export default function AdminPage() {
   // --- FIXED SCHEDULE ---
   const setQuickDuration = (months: number) => {
     const start = new Date(fixedStartDate); const end = new Date(start)
-    end.setDate(end.getDate() + (months * 30) - 1)
-    setFixedEndDate(end.toISOString().split('T')[0]); setFixedTotalPrice(3000000 * months)
+    end.setDate(end.getDate() + (months * 30) - 1); setFixedEndDate(end.toISOString().split('T')[0]); setFixedTotalPrice(3000000 * months)
   }
   useEffect(() => {
     if (!fixedStartDate || !fixedEndDate || fixedDays.length === 0) { setTotalSessions(0); return }
@@ -313,103 +309,142 @@ export default function AdminPage() {
     await supabase.from('bookings').insert(valids); toast.success(`Đã tạo ${valids.length} buổi!`); setShowFixedModal(false); fetchData()
   }
 
-  // --- FINANCE REPORT ---
+  // --- REPORT & UTILS ---
   const handleAddExpense = async () => {
-    if (!expenseName || !expenseAmount) return toast.error('Nhập đủ thông tin!')
-    await supabase.from('expenses').insert({ title: expenseName, amount: Number(expenseAmount), date: new Date().toISOString().split('T')[0], category: expenseCat })
-    toast.success('Đã thêm chi phí'); setExpenseName(''); setExpenseAmount(''); fetchReportData()
+    if (!expenseName || !expenseAmount) return toast.error('Nhập đủ thông tin!'); await supabase.from('expenses').insert({ title: expenseName, amount: Number(expenseAmount), date: new Date().toISOString().split('T')[0], category: expenseCat }); toast.success('Đã thêm chi phí'); setExpenseName(''); setExpenseAmount(''); fetchReportData()
   }
   const handleDeleteExpense = async (id: number) => { if(confirm('Xóa?')) { await supabase.from('expenses').delete().eq('id', id); fetchReportData() } }
+  
+  // 🎯 FIX LỖI: ĐÃ THÊM BIẾN netProfit
   const totalExpense = expenses.reduce((sum, item) => sum + item.amount, 0)
   const netProfit = revenueData.total - totalExpense
-
-  // --- XUẤT EXCEL ---
+  const profitMargin = revenueData.total > 0 ? (netProfit / revenueData.total) * 100 : 0
+  
   const handleExportExcel = async () => {
     const currentMonth = date.substring(0, 7)
-    toast.loading('Đang tải dữ liệu...')
-    const { data: monthData } = await supabase.from('bookings').select('*').ilike('date', `${currentMonth}%`).order('date')
-    if (!monthData || monthData.length === 0) { toast.dismiss(); return toast.warning('Không có dữ liệu') }
-    const excelData = monthData.map(b => ({
-        'Ngày': b.date, 'Giờ': `${b.start_hour}h-${b.end_hour}h`, 'Sân': b.court_id, 'Khách': b.customer_name,
-        'Tổng tiền': b.total_bill, 'Trạng thái': b.is_paid ? 'Đã thu' : 'Chưa thu'
-    }))
-    const ws = XLSX.utils.json_to_sheet(excelData)
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `Tháng ${currentMonth}`)
-    XLSX.writeFile(wb, `DoanhThu_${currentMonth}.xlsx`); toast.dismiss(); toast.success('Đã tải file!')
+    toast.loading('Đang tải...'); const { data: monthData } = await supabase.from('bookings').select('*').ilike('date', `${currentMonth}%`).order('date')
+    if (!monthData || !monthData.length) { toast.dismiss(); return toast.warning('Không có dữ liệu') }
+    const excelData = monthData.map(b => ({ 'Ngày': b.date, 'Giờ': `${b.start_hour}h-${b.end_hour}h`, 'Sân': b.court_id, 'Khách': b.customer_name, 'Tổng tiền': b.total_bill, 'Trạng thái': b.is_paid ? 'Đã thu' : 'Chưa thu' }))
+    const ws = XLSX.utils.json_to_sheet(excelData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `Tháng ${currentMonth}`); XLSX.writeFile(wb, `DoanhThu_${currentMonth}.xlsx`); toast.dismiss(); toast.success('Đã tải file!')
   }
-
-  // --- UTILS ---
-  const changeDate = (days: number) => {
-    const currentDate = new Date(date)
-    currentDate.setDate(currentDate.getDate() + days)
-    setDate(currentDate.toISOString().split('T')[0])
-  }
+  const changeDate = (days: number) => { const d = new Date(date); d.setDate(d.getDate() + days); setDate(d.toISOString().split('T')[0]) }
   const setToday = () => setDate(new Date().toISOString().split('T')[0])
-
   const getBookingForSlot = (courtId: number, hour: number) => {
     const slotBookings = bookings.filter(b => b.court_id === courtId && hour >= b.start_hour && hour < b.end_hour)
-    if (searchTerm) {
-        return slotBookings.find(b => b.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) || (b.phone_number && b.phone_number.includes(searchTerm)))
-    }
+    if (searchTerm) return slotBookings.find(b => b.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) || (b.phone_number && b.phone_number.includes(searchTerm)))
     return slotBookings.find(b => b.status === 'confirmed') || slotBookings.find(b => b.status === 'cancelled')
   }
+
+  // === 🎯 TOURNAMENT LOGIC ===
+  const toggleCatForGroup = (cat: string) => {
+      if (selectedCatsForGroup.includes(cat)) setSelectedCatsForGroup(selectedCatsForGroup.filter(c => c !== cat))
+      else setSelectedCatsForGroup([...selectedCatsForGroup, cat])
+  }
+  const addGroup = () => {
+      if (!groupNameInput || selectedCatsForGroup.length === 0) return
+      setGroupsToAdd([...groupsToAdd, { name: groupNameInput, cats: selectedCatsForGroup }])
+      setGroupNameInput(''); setSelectedCatsForGroup([])
+  }
+  const removeGroup = (index: number) => setGroupsToAdd(groupsToAdd.filter((_, i) => i !== index))
+
+  const createTournament = async () => {
+    if (!newTourName) return toast.error('Nhập tên giải!')
+    if (groupsToAdd.length === 0) return toast.error('Chưa có nhóm nào!')
+    const { data: tour, error } = await supabase.from('tournaments').insert({ name: newTourName, rules: newTourRules, status: 'open' }).select().single()
+    if (error) return toast.error('Lỗi tạo giải')
+    const catsToInsert: any[] = []
+    groupsToAdd.forEach(group => {
+        group.cats.forEach((catName: string) => {
+            catsToInsert.push({ tournament_id: tour.id, name: catName, group_name: group.name, status: 'open' })
+        })
+    })
+    await supabase.from('tournament_categories').insert(catsToInsert)
+    toast.success('Đã mở giải đấu thành công!'); setNewTourName(''); setNewTourRules(''); setGroupsToAdd([]); fetchData()
+  }
+
+  const handleSelectTournament = async (tour: any) => {
+      setSelectedTourId(tour.id); setSelectedCatId(null); setActiveBracket(null)
+      const { data } = await supabase.from('tournament_categories').select('*').eq('tournament_id', tour.id).order('group_name')
+      if(data) setCategories(data)
+  }
+
+  const handleSelectCategory = async (cat: any) => {
+      setSelectedCatId(cat.id); setActiveBracket(cat.rounds_data)
+      const { data } = await supabase.from('tournament_registrations')
+          .select('*')
+          .eq('category_id', cat.id)
+          .eq('status', 'approved') 
+      if(data) setRegisteredTeams(data)
+  }
+
+  // --- XÓA ĐỘI (KHI BỊ TỐ CÁO) ---
+  const deleteTeam = async (teamId: number) => {
+      if(confirm('Xác nhận xóa đội này khỏi giải đấu?')) {
+          await supabase.from('tournament_registrations').delete().eq('id', teamId)
+          toast.success('Đã xóa đội thành công')
+          if(selectedCatId) {
+             const { data } = await supabase.from('tournament_registrations').select('*').eq('category_id', selectedCatId).eq('status', 'approved')
+             if(data) setRegisteredTeams(data)
+          }
+      }
+  }
+
+  const generateBracket = async () => {
+    if(!selectedCatId || registeredTeams.length < 2) return toast.error('Cần > 2 đội để quay nhánh!')
+    const teams = [...registeredTeams]; for (let i = teams.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [teams[i], teams[j]] = [teams[j], teams[i]] }
+    const round1 = []; for (let i = 0; i < teams.length; i += 2) { round1.push({ id: `r1-${i}`, player1: teams[i].team_name, player2: teams[i+1]?.team_name || 'BYE', winner: teams[i+1] ? null : teams[i].team_name }) }
+    const roundsData = [round1]
+    await supabase.from('tournament_categories').update({ rounds_data: roundsData, status: 'active' }).eq('id', selectedCatId)
+    toast.success('Đã tạo nhánh!'); setActiveBracket(roundsData)
+  }
+
+  const handleWin = async (roundIndex: number, matchIndex: number, winnerName: string) => {
+    if (!activeBracket) return
+    const newRounds = [...activeBracket]; newRounds[roundIndex][matchIndex].winner = winnerName
+    if (newRounds[roundIndex].every((m: any) => m.winner !== null)) {
+        const winners = newRounds[roundIndex].map((m: any) => m.winner)
+        if (winners.length === 1) toast.success(`👑 VÔ ĐỊCH: ${winners[0]} 👑`)
+        else {
+            const nextRound = []; for (let i = 0; i < winners.length; i += 2) { nextRound.push({ id: `r${roundIndex + 1}-${i}`, player1: winners[i], player2: winners[i+1] || 'BYE', winner: winners[i+1] ? null : winners[i] }) }
+            if (newRounds[roundIndex + 1]) newRounds[roundIndex + 1] = nextRound; else newRounds.push(nextRound)
+        }
+    }
+    await supabase.from('tournament_categories').update({ rounds_data: newRounds }).eq('id', selectedCatId)
+    setActiveBracket(newRounds)
+  }
+  const deleteTournament = async (id: number) => { if(confirm('Xóa giải?')) { await supabase.from('tournaments').delete().eq('id', id); setSelectedTourId(null); fetchData() } }
 
   return (
     <div className="flex h-screen bg-slate-100 font-sans overflow-hidden">
       
-      {/* SIDEBAR */}
+      {/* SIDEBAR (GIỮ NGUYÊN) */}
       <div className={`bg-slate-900 text-white flex flex-col transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
-        <div className="p-4 flex items-center gap-3 border-b border-slate-800 h-16">
-            <div className="bg-blue-600 p-2 rounded-lg"><LayoutDashboard className="w-5 h-5"/></div>
-            {isSidebarOpen && <h1 className="font-black text-lg tracking-tight">BADMINTON<span className="text-blue-500">PRO</span></h1>}
-        </div>
+        <div className="p-4 flex items-center gap-3 border-b border-slate-800 h-16"><div className="bg-blue-600 p-2 rounded-lg"><LayoutDashboard className="w-5 h-5"/></div>{isSidebarOpen && <h1 className="font-black text-lg tracking-tight">BADMINTON<span className="text-blue-500">PRO</span></h1>}</div>
         <div className="flex-1 py-6 space-y-2 px-3">
             {[
                 { id: 'schedule', label: 'Sơ đồ sân', icon: <CalendarDays className="w-5 h-5"/> },
+                { id: 'tournament', label: 'Giải đấu', icon: <Trophy className="w-5 h-5"/> },
                 { id: 'crm', label: 'Khách hàng', icon: <Users className="w-5 h-5"/> },
                 { id: 'finance', label: 'Tài chính', icon: <Wallet className="w-5 h-5"/> },
                 { id: 'settings', label: 'Cài đặt & Kho', icon: <Package className="w-5 h-5"/> },
-            ].map(item => (
-                <button key={item.id} onClick={() => setActiveTab(item.id)}
-                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all
-                    ${activeTab === item.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                    {item.icon}
-                    {isSidebarOpen && <span className="font-bold text-sm">{item.label}</span>}
-                </button>
-            ))}
+            ].map(item => (<button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${activeTab === item.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>{item.icon}{isSidebarOpen && <span className="font-bold text-sm">{item.label}</span>}</button>))}
         </div>
-        <div className="p-4 border-t border-slate-800">
-            <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition">
-                <LogOut className="w-5 h-5"/>
-                {isSidebarOpen && <span className="font-bold text-sm">Đăng xuất</span>}
-            </button>
-        </div>
+        <div className="p-4 border-t border-slate-800"><button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition"><LogOut className="w-5 h-5"/>{isSidebarOpen && <span className="font-bold text-sm">Đăng xuất</span>}</button></div>
       </div>
 
       {/* MAIN CONTENT */}
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-        {/* SCHEDULE TAB */}
+        
+        {/* TAB 1: SCHEDULE */}
         {activeTab === 'schedule' && (
             <div className="flex h-full">
                 {/* Lưới Sân */}
                 <div className="flex-1 flex flex-col border-r border-slate-200">
                     <div className="h-16 bg-white border-b border-slate-200 flex justify-between items-center px-6 shadow-sm">
-                        <div className="flex items-center gap-4">
-                            <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5 text-slate-600"/></button>
-                            <div className="relative">
-                                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400"/>
-                                <input type="text" placeholder="Tìm tên khách..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-100 rounded-full text-sm font-medium border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 w-64 transition-all"/>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                            <button onClick={() => changeDate(-1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition"><ChevronLeft className="w-4 h-4 text-slate-600"/></button>
-                            <input type="date" value={date} onChange={(e)=>setDate(e.target.value)} className="bg-transparent outline-none text-slate-800 font-bold text-sm mx-2" />
-                            <button onClick={() => setToday()} className="text-xs font-bold text-blue-600 hover:underline px-2">Hôm nay</button>
-                            <button onClick={() => changeDate(1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition"><ChevronRight className="w-4 h-4 text-slate-600"/></button>
-                        </div>
+                        <div className="flex items-center gap-4"><button onClick={() => setSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5 text-slate-600"/></button><div className="relative"><Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400"/><input type="text" placeholder="Tìm tên khách..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 bg-slate-100 rounded-full text-sm font-medium border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 w-64 transition-all"/></div></div>
+                        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200"><button onClick={() => changeDate(-1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition"><ChevronLeft className="w-4 h-4 text-slate-600"/></button><input type="date" value={date} onChange={(e)=>setDate(e.target.value)} className="bg-transparent outline-none text-slate-800 font-bold text-sm mx-2" /><button onClick={() => setToday()} className="text-xs font-bold text-blue-600 hover:underline px-2">Hôm nay</button><button onClick={() => changeDate(1)} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition"><ChevronRight className="w-4 h-4 text-slate-600"/></button></div>
                         <button onClick={() => setShowFixedModal(true)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-emerald-700 flex items-center gap-2 shadow-lg shadow-emerald-200"><CalendarDays className="w-4 h-4"/> Đặt lịch tháng</button>
                     </div>
-                    
                     <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar">
                         <div className="grid grid-cols-2 xl:grid-cols-4 gap-6 pb-20">
                             {courts.map(court => (
@@ -417,27 +452,9 @@ export default function AdminPage() {
                                     <div className="p-4 bg-slate-50 border-b border-slate-200 text-center font-black text-slate-700 text-lg uppercase tracking-wide">{court.name}</div>
                                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                                         {Array.from({length: 18}, (_, i) => i + 5).map(hour => {
-                                            const booking = getBookingForSlot(court.id, hour)
-                                            if (!booking) return <div key={hour} className="h-12 border-b border-slate-50 flex items-center justify-center text-[10px] text-slate-300 hover:bg-slate-50">{hour}h</div>
-                                            if (booking.start_hour !== hour) return null
-                                            const isSelected = selectedBooking?.id === booking.id
-                                            const duration = booking.end_hour - booking.start_hour
-                                            const isCancelled = booking.status === 'cancelled'
-                                            return (
-                                                <div key={booking.id} style={{ height: `${duration * 48}px` }} onClick={() => handleSelectBooking(booking)}
-                                                    className={`m-1 rounded-xl border cursor-pointer relative group flex flex-col justify-center px-3 shadow-sm transition-all hover:scale-[1.02]
-                                                    ${isCancelled ? 'bg-slate-100 border-slate-200 opacity-60 grayscale' : isSelected ? 'bg-blue-600 border-blue-600 text-white ring-2 ring-offset-2 ring-blue-500' : booking.is_paid ? (booking.group_id ? 'bg-purple-50 border-purple-200' : 'bg-emerald-50 border-emerald-200') : 'bg-white border-l-4 border-l-blue-500 border-y border-r border-slate-200'}`}
-                                                >
-                                                    <div className="flex justify-between items-center">
-                                                        <span className={`font-bold text-xs ${isCancelled ? 'line-through text-slate-400' : isSelected ? 'text-white' : booking.is_paid ? 'text-emerald-700' : 'text-blue-700'}`}>{booking.start_hour}h - {booking.end_hour}h</span>
-                                                        <div className="flex items-center gap-1">
-                                                            {booking.is_checked_in && <UserCheck className={`w-3 h-3 ${isSelected ? 'text-white' : 'text-blue-500'}`}/>}
-                                                            {!isCancelled && booking.is_paid && <Check className={`w-3 h-3 ${isSelected ? 'text-white' : 'text-emerald-600'}`}/>}
-                                                        </div>
-                                                    </div>
-                                                    <p className={`font-bold text-sm truncate ${isCancelled ? 'text-slate-400' : isSelected ? 'text-white' : 'text-slate-800'}`}>{booking.customer_name}</p>
-                                                </div>
-                                            )
+                                            const booking = getBookingForSlot(court.id, hour); if (!booking) return <div key={hour} className="h-12 border-b border-slate-50 flex items-center justify-center text-[10px] text-slate-300 hover:bg-slate-50">{hour}h</div>; if (booking.start_hour !== hour) return null;
+                                            const isSelected = selectedBooking?.id === booking.id; const duration = booking.end_hour - booking.start_hour; const isCancelled = booking.status === 'cancelled';
+                                            return (<div key={booking.id} style={{ height: `${duration * 48}px` }} onClick={() => handleSelectBooking(booking)} className={`m-1 rounded-xl border cursor-pointer relative group flex flex-col justify-center px-3 shadow-sm transition-all hover:scale-[1.02] ${isCancelled ? 'bg-slate-100 border-slate-200 opacity-60 grayscale' : isSelected ? 'bg-blue-600 border-blue-600 text-white ring-2 ring-offset-2 ring-blue-500' : booking.is_paid ? (booking.group_id ? 'bg-purple-50 border-purple-200' : 'bg-emerald-50 border-emerald-200') : 'bg-white border-l-4 border-l-blue-500 border-y border-r border-slate-200'}`}><div className="flex justify-between items-center"><span className={`font-bold text-xs ${isCancelled ? 'line-through text-slate-400' : isSelected ? 'text-white' : booking.is_paid ? 'text-emerald-700' : 'text-blue-700'}`}>{booking.start_hour}h - {booking.end_hour}h</span><div className="flex items-center gap-1">{booking.is_checked_in && <UserCheck className={`w-3 h-3 ${isSelected ? 'text-white' : 'text-blue-500'}`}/>}{!isCancelled && booking.is_paid && <Check className={`w-3 h-3 ${isSelected ? 'text-white' : 'text-emerald-600'}`}/>}</div></div><p className={`font-bold text-sm truncate ${isCancelled ? 'text-slate-400' : isSelected ? 'text-white' : 'text-slate-800'}`}>{booking.customer_name}</p></div>)
                                         })}
                                     </div>
                                 </div>
@@ -445,7 +462,6 @@ export default function AdminPage() {
                         </div>
                     </div>
                 </div>
-
                 {/* Sidebar Phải: Hóa Đơn */}
                 <div className={`w-[400px] bg-white border-l border-slate-200 flex flex-col transition-all ${!selectedBooking ? 'translate-x-full w-0' : 'translate-x-0'}`}>
                     {selectedBooking && (
@@ -456,63 +472,16 @@ export default function AdminPage() {
                             </div>
                             <div className="flex-1 overflow-y-auto p-6">
                                 {selectedBooking.status === 'cancelled' ? (
-                                    <div className="bg-slate-100 p-6 rounded-xl text-center border-2 border-dashed border-slate-300">
-                                        <UserX className="w-12 h-12 text-slate-400 mx-auto mb-2"/>
-                                        <h3 className="font-bold text-slate-700">Khách báo vắng</h3>
-                                        <p className="text-sm text-slate-500 mb-4">Slot này trống, có thể đặt đè.</p>
-                                        {role === 'admin' && <button onClick={() => handleDelete(selectedBooking.id)} className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold">Xóa lịch sử</button>}
-                                    </div>
+                                    <div className="bg-slate-100 p-6 rounded-xl text-center border-2 border-dashed border-slate-300"><UserX className="w-12 h-12 text-slate-400 mx-auto mb-2"/><h3 className="font-bold text-slate-700">Khách báo vắng</h3><p className="text-sm text-slate-500 mb-4">Slot này trống, có thể đặt đè.</p>{role === 'admin' && <button onClick={() => handleDelete(selectedBooking.id)} className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold mt-2">Xóa lịch sử</button>}</div>
                                 ) : (
                                     <>
-                                        <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 mb-6 relative">
-                                            <button onClick={handleCheckIn} className={`absolute top-4 right-4 p-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${selectedBooking.is_checked_in ? 'bg-emerald-100 text-emerald-700 pointer-events-none' : 'bg-white border border-blue-200 text-blue-600 hover:bg-blue-600 hover:text-white shadow-sm'}`}>
-                                                {selectedBooking.is_checked_in ? <><UserCheck className="w-3 h-3"/> Đã đến</> : 'Check-in'}
-                                            </button>
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold"><User className="w-5 h-5"/></div>
-                                                <div><p className="font-bold text-slate-800">{selectedBooking.customer_name}</p><p className="text-xs text-slate-500">{selectedBooking.phone_number}</p></div>
-                                            </div>
-                                            <div className="flex justify-between text-sm py-2 border-t border-blue-200/50"><span className="text-slate-500">Sân {selectedBooking.court_id}</span><span className="font-bold text-slate-800">{selectedBooking.start_hour}h - {selectedBooking.end_hour}h</span></div>
-                                        </div>
-
-                                        <div className="space-y-4 mb-6">
-                                            <div className="flex justify-between items-center text-sm p-3 bg-slate-50 rounded-lg border border-slate-100">
-                                                <div className="flex flex-col"><span className="text-slate-500">Tiền sân</span>{selectedBooking.group_id && selectedBooking.is_paid && <span className="text-[10px] text-purple-600 font-bold">(Đã đóng tháng)</span>}</div>
-                                                <span className="font-bold text-slate-800">{selectedBooking.group_id && selectedBooking.is_paid ? '0đ' : ((selectedBooking.end_hour - selectedBooking.start_hour) * pricePerHour).toLocaleString() + 'đ'}</span>
-                                            </div>
-                                            {cart.map((item, idx) => (
-                                                <div key={idx} className="flex justify-between items-center text-sm group">
-                                                    <div><p className="font-medium text-slate-700">{item.name}</p><p className="text-[10px] text-slate-400">{item.price.toLocaleString()} x {item.qty}</p></div>
-                                                    <div className="flex items-center gap-2"><button onClick={() => removeFromCart(item.id)} className="w-6 h-6 rounded bg-slate-100 flex items-center justify-center text-slate-500 hover:text-red-500"><Minus className="w-3 h-3"/></button><span className="font-bold text-xs w-4 text-center">{item.qty}</span><button onClick={() => addToCart(item)} className="w-6 h-6 rounded bg-slate-100 flex items-center justify-center text-slate-500 hover:text-blue-500"><Plus className="w-3 h-3"/></button></div>
-                                                    <p className="font-bold text-slate-800">{(item.price * item.qty).toLocaleString()}đ</p>
-                                                </div>
-                                            ))}
-                                        </div>
-
-                                        <div className="border-t border-slate-200 pt-4">
-                                            <p className="text-xs font-bold text-slate-400 uppercase mb-3">Thêm dịch vụ</p>
-                                            <div className="space-y-4">
-                                                {CATEGORIES.map(cat => {
-                                                    const items = products.filter(p => p.category === cat.id || (!p.category && cat.id === 'drink'))
-                                                    if(!items.length) return null
-                                                    return (
-                                                        <div key={cat.id}>
-                                                            <p className="text-[10px] font-bold text-blue-600 mb-2">{cat.name}</p>
-                                                            <div className="grid grid-cols-2 gap-2">{items.map(p => (<button key={p.id} onClick={() => addToCart(p)} className="text-left p-2 border border-slate-200 rounded-lg hover:border-blue-500 transition relative overflow-hidden"><p className="text-xs font-bold text-slate-700 truncate">{p.name}</p><div className="flex justify-between items-end mt-1"><span className="text-[10px] text-slate-500">{p.price.toLocaleString()}</span>{p.stock !== null && <span className={`text-[9px] px-1 rounded ${p.stock < 5 ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}>Kho: {p.stock}</span>}</div></button>))}</div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    
-                                        <div className="mt-4 p-3 bg-white border border-slate-200 rounded-xl flex items-center gap-3">
-                                            <img src={`https://img.vietqr.io/image/${BANK_ID}-${ACCOUNT_NO}-${TEMPLATE}.png?amount=${calculateTotal()}&addInfo=SAN ${selectedBooking.court_id} ${selectedBooking.customer_name}&accountName=${ACCOUNT_NAME}`} alt="QR" className="w-16 h-16 rounded-lg border border-slate-100"/>
-                                            <div className="flex-1 overflow-hidden"><p className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1"><QrCode className="w-3 h-3"/> Quét mã MBBANK</p><p className="text-xs text-slate-500 truncate">{ACCOUNT_NO}</p><p className="text-blue-600 font-black text-lg mt-0.5">{calculateTotal().toLocaleString()}đ</p></div>
-                                        </div>
+                                        <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 mb-6 relative"><button onClick={handleCheckIn} className={`absolute top-4 right-4 p-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${selectedBooking.is_checked_in ? 'bg-emerald-100 text-emerald-700 pointer-events-none' : 'bg-white border border-blue-200 text-blue-600 hover:bg-blue-600 hover:text-white shadow-sm'}`}>{selectedBooking.is_checked_in ? <><UserCheck className="w-3 h-3"/> Đã đến</> : 'Check-in'}</button><div className="flex items-center gap-3 mb-3"><div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold"><User className="w-5 h-5"/></div><div><p className="font-bold text-slate-800">{selectedBooking.customer_name}</p><p className="text-xs text-slate-500">{selectedBooking.phone_number}</p></div></div><div className="flex justify-between text-sm py-2 border-t border-blue-200/50"><span className="text-slate-500">Sân {selectedBooking.court_id}</span><span className="font-bold text-slate-800">{selectedBooking.start_hour}h - {selectedBooking.end_hour}h</span></div></div>
+                                        <div className="space-y-4 mb-6"><div className="flex justify-between items-center text-sm p-3 bg-slate-50 rounded-lg border border-slate-100"><div className="flex flex-col"><span className="text-slate-500">Tiền sân</span>{selectedBooking.group_id && selectedBooking.is_paid && <span className="text-[10px] text-purple-600 font-bold">(Đã đóng tháng)</span>}</div><span className="font-bold text-slate-800">{selectedBooking.group_id && selectedBooking.is_paid ? '0đ' : ((selectedBooking.end_hour - selectedBooking.start_hour) * pricePerHour).toLocaleString() + 'đ'}</span></div>{cart.map((item, idx) => (<div key={idx} className="flex justify-between items-center text-sm group"><div><p className="font-medium text-slate-700">{item.name}</p><p className="text-[10px] text-slate-400">{item.price.toLocaleString()} x {item.qty}</p></div><div className="flex items-center gap-2"><button onClick={() => removeFromCart(item.id)} className="w-6 h-6 rounded bg-slate-100 flex items-center justify-center text-slate-500 hover:text-red-500"><Minus className="w-3 h-3"/></button><span className="font-bold text-xs w-4 text-center">{item.qty}</span><button onClick={() => addToCart(item)} className="w-6 h-6 rounded bg-slate-100 flex items-center justify-center text-slate-500 hover:text-blue-500"><Plus className="w-3 h-3"/></button></div><p className="font-bold text-slate-800">{(item.price * item.qty).toLocaleString()}đ</p></div>))}</div>
+                                        <div className="border-t border-slate-200 pt-4"><p className="text-xs font-bold text-slate-400 uppercase mb-3">Thêm dịch vụ</p><div className="space-y-4">{CATEGORIES.map(cat => {const items = products.filter(p => p.category === cat.id || (!p.category && cat.id === 'drink')); if(!items.length) return null; return (<div key={cat.id}><p className="text-[10px] font-bold text-blue-600 mb-2">{cat.name}</p><div className="grid grid-cols-2 gap-2">{items.map(p => (<button key={p.id} onClick={() => addToCart(p)} className="text-left p-2 border border-slate-200 rounded-lg hover:border-blue-500 transition relative overflow-hidden"><p className="text-xs font-bold text-slate-700 truncate">{p.name}</p><div className="flex justify-between items-end mt-1"><span className="text-[10px] text-slate-500">{p.price.toLocaleString()}</span>{p.stock !== null && <span className={`text-[9px] px-1 rounded ${p.stock < 5 ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}>Kho: {p.stock}</span>}</div></button>))}</div></div>)})}</div></div>
+                                        <div className="mt-4 p-3 bg-white border border-slate-200 rounded-xl flex items-center gap-3"><img src={`https://img.vietqr.io/image/${BANK_ID}-${ACCOUNT_NO}-${TEMPLATE}.png?amount=${calculateTotal()}&addInfo=SAN ${selectedBooking.court_id} ${selectedBooking.customer_name}&accountName=${ACCOUNT_NAME}`} alt="QR" className="w-16 h-16 rounded-lg border border-slate-100"/><div className="flex-1 overflow-hidden"><p className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1"><QrCode className="w-3 h-3"/> Quét mã MBBANK</p><p className="text-xs text-slate-500 truncate">{ACCOUNT_NO}</p><p className="text-blue-600 font-black text-lg mt-0.5">{calculateTotal().toLocaleString()}đ</p></div></div>
                                     </>
                                 )}
                             </div>
-
                             {selectedBooking.status !== 'cancelled' && (
                                 <div className="p-6 border-t border-slate-200 bg-slate-50">
                                     <div className="flex justify-between items-end mb-4"><span className="text-sm text-slate-500 font-bold">Tổng cộng</span><span className="text-3xl font-black text-blue-600">{calculateTotal().toLocaleString()}đ</span></div>
@@ -520,10 +489,7 @@ export default function AdminPage() {
                                         {selectedBooking.group_id && role === 'admin' && <button onClick={() => handleDeleteGroup(selectedBooking.group_id)} className="py-3 rounded-xl border border-red-200 text-red-600 text-xs font-bold hover:bg-red-50">Xóa Nhóm</button>}
                                         <button onClick={handleCancelSession} className="py-3 rounded-xl border border-orange-200 text-orange-600 text-xs font-bold hover:bg-orange-50">Báo Vắng</button>
                                     </div>
-                                    <div className="flex gap-3">
-                                        <button onClick={handleUpdateOrder} className="flex-1 bg-white border border-slate-300 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50">Lưu</button>
-                                        <button onClick={handleCheckout} className="flex-[2] bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-blue-600 shadow-lg flex justify-center items-center gap-2"><Printer className="w-4 h-4"/> Thu Tiền</button>
-                                    </div>
+                                    <div className="flex gap-3"><button onClick={handleUpdateOrder} className="flex-1 bg-white border border-slate-300 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50">Lưu</button><button onClick={handleCheckout} className="flex-[2] bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-blue-600 shadow-lg flex justify-center items-center gap-2"><Printer className="w-4 h-4"/> Thu Tiền</button></div>
                                 </div>
                             )}
                         </>
@@ -532,7 +498,150 @@ export default function AdminPage() {
             </div>
         )}
 
-        {/* ... (GIỮ NGUYÊN CÁC TAB KHÁC VÀ MODAL NHƯ CŨ) ... */}
+        {/* TAB 2: TOURNAMENT (GIẢI ĐẤU) */}
+        {activeTab === 'tournament' && (
+            <div className="flex-1 p-8 overflow-y-auto bg-slate-50">
+                <div className="max-w-7xl mx-auto">
+                    <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><Trophy className="w-8 h-8 text-yellow-500"/> Quản Lý Giải Đấu</h2>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 h-full">
+                        
+                        {/* CỘT 1: TẠO GIẢI (4/12) */}
+                        <div className="lg:col-span-4 space-y-6">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                <h3 className="font-bold text-slate-700 mb-4 uppercase text-sm flex items-center gap-2"><Plus className="w-4 h-4"/> 1. Tạo giải mới</h3>
+                                <div className="space-y-4">
+                                    <input type="text" placeholder="Tên giải đấu (VD: Giải Mùa Hè)" value={newTourName} onChange={(e) => setNewTourName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold"/>
+                                    <textarea placeholder="Điều lệ giải (VD: Thời gian, địa điểm, thể thức...)" value={newTourRules} onChange={(e) => setNewTourRules(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl text-sm h-24 resize-none"/>
+                                    
+                                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                        <p className="text-xs font-bold text-slate-500 mb-2">Thêm nhóm/bảng đấu</p>
+                                        <div className="space-y-2 mb-3">
+                                            <input type="text" placeholder="Tên nhóm (VD: Nhóm 1 - Trình A)" value={groupNameInput} onChange={(e) => setGroupNameInput(e.target.value)} className="w-full p-2 border rounded-lg text-sm"/>
+                                            <div className="flex flex-wrap gap-2">
+                                                {BASE_CATEGORIES.map(cat => (
+                                                    <button key={cat} onClick={() => toggleCatForGroup(cat)} className={`text-[10px] px-2 py-1 rounded border transition ${selectedCatsForGroup.includes(cat) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+                                                        {cat}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <button onClick={addGroup} className="w-full bg-blue-100 text-blue-700 text-xs font-bold py-2 rounded-lg hover:bg-blue-200">+ Thêm nhóm này</button>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            {groupsToAdd.map((g, i) => (
+                                                <div key={i} className="flex justify-between items-center bg-white px-2 py-2 rounded border border-slate-100 text-xs">
+                                                    <div><span className="font-bold text-slate-700 block">{g.name}</span><span className="text-slate-400 text-[10px]">{g.cats.join(', ')}</span></div>
+                                                    <button onClick={() => removeGroup(i)}><X className="w-3 h-3 text-red-400"/></button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <button onClick={createTournament} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold text-sm hover:bg-blue-600 transition shadow-lg">
+                                        Tạo Giải Đấu
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                                <h3 className="font-bold text-slate-700 mb-4 text-sm uppercase">Danh sách giải</h3>
+                                <div className="space-y-2">
+                                    {tournaments.map(t => (
+                                        <div key={t.id} onClick={() => handleSelectTournament(t)} className={`p-3 rounded-xl border cursor-pointer transition flex justify-between items-center ${selectedTourId === t.id ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-200' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+                                            <div><p className="font-bold text-slate-800 text-sm">{t.name}</p><p className="text-[10px] text-slate-400">{new Date(t.created_at).toLocaleDateString('vi-VN')}</p></div>
+                                            <button onClick={(e) => {e.stopPropagation(); deleteTournament(t.id)}} className="text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* CỘT 2: CHỌN NỘI DUNG (3/12) */}
+                        <div className="lg:col-span-3 space-y-6">
+                            {selectedTourId ? (
+                                <>
+                                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                                        <h3 className="font-bold text-slate-700 mb-3 text-sm uppercase">2. Chọn nội dung</h3>
+                                        <div className="space-y-3">
+                                            {Object.entries(categories.reduce((acc:any, item:any) => {
+                                                const group = item.group_name || 'Khác'; if (!acc[group]) acc[group] = []; acc[group].push(item); return acc;
+                                            }, {})).map(([groupName, cats]: [string, any]) => (
+                                                <div key={groupName}>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">{groupName}</p>
+                                                    <div className="space-y-1">
+                                                        {cats.map((c:any) => (
+                                                            <div key={c.id} onClick={() => handleSelectCategory(c)} 
+                                                                className={`p-3 rounded-xl border cursor-pointer transition ${selectedCatId === c.id ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-sm' : 'bg-white hover:bg-slate-50'}`}>
+                                                                <p className="font-bold text-sm">{c.name}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {selectedCatId && (
+                                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                                            <h3 className="font-bold text-slate-700 mb-2 text-sm uppercase">Đội tham gia ({registeredTeams.length})</h3>
+                                            <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1 mb-4">
+                                                {registeredTeams.length === 0 ? <p className="text-xs text-slate-400 italic">Chưa có đội nào đăng ký</p> : 
+                                                registeredTeams.map((team, idx) => (
+                                                    <div key={team.id} className="text-xs p-2 bg-slate-50 rounded border border-slate-100 flex justify-between items-center group">
+                                                        <div><span className="font-bold text-slate-400">{idx+1}.</span> {team.team_name}</div>
+                                                        <button onClick={() => deleteTeam(team.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 className="w-3 h-3"/></button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <button onClick={generateBracket} className="w-full bg-purple-600 text-white py-2 rounded-lg font-bold text-xs hover:bg-purple-700 flex justify-center items-center gap-2"><Shuffle className="w-3 h-3"/> TẠO NHÁNH ĐẤU</button>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="h-full flex items-center justify-center text-slate-400 text-sm italic border-2 border-dashed rounded-2xl border-slate-200">Chọn giải đấu bên trái</div>
+                            )}
+                        </div>
+
+                        {/* CỘT 3: SƠ ĐỒ THI ĐẤU (5/12) */}
+                        <div className="lg:col-span-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 overflow-x-auto">
+                            <h3 className="font-bold text-slate-700 mb-6 text-sm uppercase flex items-center gap-2"><Swords className="w-4 h-4"/> 3. Sơ đồ nhánh đấu</h3>
+                            {activeBracket ? (
+                                <div className="min-w-[500px]">
+                                    <div className="flex justify-start gap-8">
+                                        {activeBracket.map((round: any[], roundIndex: number) => (
+                                            <div key={roundIndex} className="flex flex-col justify-center gap-6 w-40">
+                                                <div className="text-center font-bold text-blue-600 uppercase text-[10px] mb-2 bg-blue-50 py-1 rounded">
+                                                    {round.length === 1 ? 'Chung Kết' : `Vòng ${roundIndex + 1}`}
+                                                </div>
+                                                {round.map((match, matchIndex) => (
+                                                    <div key={match.id} className="relative flex flex-col gap-px group">
+                                                        {/* CSS Connector */}
+                                                        {roundIndex < activeBracket.length - 1 && (<div className="absolute top-1/2 -right-8 w-8 h-px bg-slate-300 z-0"></div>)}
+                                                        {roundIndex < activeBracket.length - 1 && matchIndex % 2 === 0 && (<div className="absolute top-1/2 -right-8 w-px h-[calc(100%+1.5rem)] bg-slate-300 z-0 translate-y-1/2"></div>)}
+
+                                                        <div className="z-10 bg-white border border-slate-300 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all text-xs">
+                                                            <button disabled={!match.player1 || match.player1 === 'BYE'} onClick={() => handleWin(roundIndex, matchIndex, match.player1)} className={`w-full p-2 text-left font-bold transition-all flex justify-between items-center ${match.winner === match.player1 ? 'bg-green-100 text-green-800' : 'hover:bg-slate-50 text-slate-700'}`}>{match.player1}{match.winner === match.player1 && <Check className="w-3 h-3"/>}</button>
+                                                            <div className="h-px bg-slate-200"></div>
+                                                            <button disabled={!match.player2 || match.player2 === 'BYE'} onClick={() => handleWin(roundIndex, matchIndex, match.player2)} className={`w-full p-2 text-left font-bold transition-all flex justify-between items-center ${match.winner === match.player2 ? 'bg-green-100 text-green-800' : 'hover:bg-slate-50 text-slate-700'}`}>{match.player2}{match.winner === match.player2 && <Check className="w-3 h-3"/>}</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ))}
+                                        {activeBracket[activeBracket.length - 1][0].winner && <div className="flex flex-col justify-center items-center w-32"><div className="text-center font-bold text-yellow-500 uppercase text-[10px] mb-2 tracking-wider">Vô Địch</div><div className="p-4 bg-yellow-50 border-2 border-yellow-400 text-yellow-800 rounded-xl shadow-lg text-center animate-bounce"><Crown className="w-6 h-6 mx-auto mb-1"/><p className="font-black text-sm">{activeBracket[activeBracket.length - 1][0].winner}</p></div></div>}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-50"><Trophy className="w-16 h-16 mb-2"/><p className="text-xs">Chọn nội dung và bấm quay nhánh</p></div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* TAB 3 & 4 & 5 (FINANCE, SETTINGS, CRM) - GIỮ NGUYÊN */}
         {activeTab === 'finance' && (
             <div className="flex-1 p-8 overflow-y-auto bg-slate-50">
                 <div className="max-w-5xl mx-auto">
@@ -561,6 +670,7 @@ export default function AdminPage() {
             </div>
         )}
 
+        {/* TAB 6: CRM */}
         {activeTab === 'crm' && (
             <div className="flex-1 p-8 overflow-y-auto bg-slate-50">
                 <div className="max-w-5xl mx-auto">
@@ -572,7 +682,7 @@ export default function AdminPage() {
 
       </div>
 
-      {/* ================= MODAL LỊCH CỐ ĐỊNH (GIỮ NGUYÊN) ================= */}
+      {/* ================= MODAL LỊCH CỐ ĐỊNH ================= */}
       {showFixedModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
